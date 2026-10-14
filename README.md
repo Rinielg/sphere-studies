@@ -1,16 +1,6 @@
 # Sphere Studies
 
-A browser-based parametric generative graphics editor reconstructed from the supplied storyboard and replication brief. No build step or third-party runtime dependencies.
-
-## Run locally
-
-From this directory:
-
-```sh
-python3 -m http.server 4173 --directory dist
-```
-
-Open http://localhost:4173. WebGL must be available in your browser.
+A reconstructed browser-based parametric generative graphics editor.
 
 ## Use
 
