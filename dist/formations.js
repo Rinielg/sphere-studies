@@ -14,6 +14,7 @@ export const FORMATIONS = Object.freeze([
   { id: 'cloud', label: 'Scattered cloud' },
   { id: 'grid', label: 'Square grid' },
   { id: 'compass', label: 'Compass ring' },
+  { id: 'helix', label: 'DNA helix' },
 ].map(Object.freeze));
 
 function hash(value) {
@@ -136,43 +137,134 @@ function rings(state, seed) {
   return { spheres, links: [] };
 }
 
-// Measured centres and circular contours from the supplied 1494×1240 reference.
-// The asymmetric arc and six-layer fold cannot be reproduced by compressing a
-// sector of an evenly sampled circle. Pixel radii preserve the visible size ramp.
-const loopReference = [
-  [359, 249, 77, -.20], [505, 215, 74, -.15],
-  [677, 295, 73, -.10], [853, 425, 71, -.05],
-  [1012, 535, 73, .10], [1251, 519, 82, -.15],
-  [1249, 560, 83, -.40], [1190, 525, 85, .40],
-  [1167, 589, 72, -.65], [1062, 627, 97, .75],
-  [849, 794, 95, .30], [629, 936, 92, .25],
-  [441, 969, 89, .15], [309, 860, 85, .05],
-  [252, 645, 83, -.05], [270, 410, 79, -.15]
-];
+const smooth = v => { const x = clamp(v, 0, 1); return x * x * (3 - 2 * x); };
+// Rotate a point by yaw (about y), then pitch (about x), then roll (in the screen plane).
+function orient(x, y, z, yaw, pitch, roll) {
+  let c = Math.cos(yaw), s = Math.sin(yaw);
+  [x, z] = [x * c + z * s, -x * s + z * c];
+  c = Math.cos(pitch); s = Math.sin(pitch);
+  [y, z] = [y * c - z * s, y * s + z * c];
+  c = Math.cos(roll); s = Math.sin(roll);
+  [x, y] = [x * c - y * s, x * s + y * c];
+  return [x, y, z];
+}
 
+// Measured centres and contour radii from the supplied 1494×1240 reference,
+// in scene units. A three-harmonic Fourier fit turns them into a smooth closed
+// curve that spheres can travel along without bunching in the original fold.
+const loopReference = [
+  [359, 249, 77], [505, 215, 74], [677, 295, 73], [853, 425, 71],
+  [1012, 535, 73], [1251, 519, 82], [1249, 560, 83], [1190, 525, 85],
+  [1167, 589, 72], [1062, 627, 97], [849, 794, 95], [629, 936, 92],
+  [441, 969, 89], [309, 860, 85], [252, 645, 83], [270, 410, 79]
+].map(([px, py, pr]) => [(px - 750) / 600, (600 - py) / 600, pr / 600]);
+const loopFourier = [0, 1, 2].map(column => {
+  const n = loopReference.length, coefficients = [];
+  for (let h = 0; h <= 3; h++) {
+    let a = 0, b = 0;
+    loopReference.forEach((point, k) => { const w = TAU * k / n; a += point[column] * Math.cos(h * w); b += point[column] * Math.sin(h * w); });
+    coefficients.push([a * (h ? 2 : 1) / n, b * 2 / n]);
+  }
+  return coefficients;
+});
+const loopCurve = (column, u) => loopFourier[column].reduce((sum, [a, b], h) => sum + a * Math.cos(h * u) + (h ? b * Math.sin(h * u) : 0), 0);
+// Arc-length table: equal steps along the curve give evenly spaced spheres.
+const loopArc = (() => {
+  const steps = 720, lengths = [0];
+  let previous = [loopCurve(0, 0), loopCurve(1, 0)];
+  for (let m = 1; m <= steps; m++) {
+    const u = TAU * m / steps, point = [loopCurve(0, u), loopCurve(1, u)];
+    lengths.push(lengths[m - 1] + Math.hypot(point[0] - previous[0], point[1] - previous[1]));
+    previous = point;
+  }
+  return { steps, lengths, total: lengths[steps] };
+})();
+function loopAngleAt(fraction) {
+  const target = fraction * loopArc.total, lengths = loopArc.lengths;
+  let lo = 0, hi = loopArc.steps;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (lengths[mid] < target) lo = mid; else hi = mid; }
+  return TAU * (lo + (target - lengths[lo]) / ((lengths[hi] - lengths[lo]) || 1)) / loopArc.steps;
+}
+const loopCentre = [loopFourier[0][0][0], loopFourier[1][0][0]];
+
+/**
+ * A closed loop that moves in real depth: spheres flow along the curve while a
+ * travelling wave lifts it towards and away from the camera, and the loop sways.
+ */
 function loop(state, seed) {
   const count = density(state.loopDensity, [10, 16, 22, 28]);
-  const height = clamp(number(state.waveHeight, 0.6), 0, 3);
-  const delta = height - .6;
-  const radiusScale = Math.sqrt(16 / count);
-  const spheres = [];
-  for (let i = 0; i < count; i++) {
-    // Medium samples the sixteen measured contours exactly; other densities
-    // resample the same closed path instead of reverting to a regular circle.
-    const position = i * loopReference.length / count;
-    const index = Math.floor(position), blend = position - index;
-    const a = loopReference[index], b = loopReference[(index + 1) % loopReference.length];
-    const point = a.map((value, j) => value + (b[j] - value) * blend);
-    const phase = position / loopReference.length * TAU;
-    const knot = index >= 4 && index <= 9 ? 1 : .15;
-    const x = (point[0] - 750) / 600 + delta * .012 * knot * Math.sin(phase * 3);
-    const y = (600 - point[1]) / 600 + delta * .012 * knot * Math.cos(phase * 3);
-    const z = point[3] * (1 + delta * .65);
-    // Compensate the renderer's depth scale at the reference wave height.
-    const r = point[2] / 600 / (1 + point[3] * .12) * radiusScale;
-    spheres.push(sphere('loop', seed, i, x, y, z, r));
+  const depth = clamp(number(state.loopDepth, 0.42), 0, 1.5);
+  const waves = Math.round(clamp(number(state.loopWaves, 2), 1, 6));
+  const flow = clamp(number(state.loopFlow, 0.25), 0, 2);
+  const sizeScale = Math.sqrt(16 / count);
+  const identities = Array.from({ length: count }, (_, i) => sphere('loop', seed, i, 0, 0, 0, 0));
+  const animate = time => {
+    const yaw = Math.sin(time * .13) * .32, pitch = .28 + Math.sin(time * .09) * .055;
+    const spheres = identities.map((item, i) => {
+      const u = loopAngleAt(((i / count + time * flow * .03) % 1 + 1) % 1);
+      const travelling = waves * u - time * .55;
+      const [x, y, z] = orient(
+        loopCurve(0, u) - loopCentre[0],
+        loopCurve(1, u) - loopCentre[1] + Math.cos(travelling) * depth * .08,
+        Math.sin(travelling) * depth * .62, yaw, pitch, 0);
+      return { ...item, x: x + loopCentre[0] * .4, y, z, r: loopCurve(2, u) * sizeScale };
+    });
+    return { spheres, links: [] };
+  };
+  return { ...animate(0), animate };
+}
+
+/**
+ * A DNA double helix. Each base pair has a continuous strand coordinate that
+ * advances with time; it wraps at the ends, where spheres shrink to nothing, so
+ * the wrap is never visible. Rungs join each pair; backbones join each strand.
+ */
+function helix(state, seed) {
+  const pairs = Math.round(clamp(number(state.pairs, 14), 4, 32));
+  const turns = clamp(number(state.turns, 1.4), 0.25, 4);
+  const flow = clamp(number(state.helixFlow, 0.35), 0, 3);
+  const spin = clamp(number(state.spin, 0.12), 0, 1);
+  const groove = clamp(number(state.groove, 150), 60, 180) * Math.PI / 180;
+  const roll = clamp(number(state.helixTilt, -32), -90, 90) * Math.PI / 180;
+  const backbone = state.backbone !== false, byStrand = state.strandColour !== false;
+  const length = 2.05, reach = .32, baseRadius = .074 * (14 / pairs) ** .25;
+  const identities = [];
+  for (let i = 0; i < pairs; i++) {
+    for (let k = 0; k < 2; k++) {
+      const item = sphere('helix', seed, 2 * i + k, 0, 0, 0, 0);
+      const rand = random(`${seed}/${item.id}/helix`);
+      item.size = baseRadius * (.82 + rand() * .36);
+      if (byStrand) item.palette = k ? .74 + rand() * .22 : .04 + rand() * .22;
+      identities.push(item);
+    }
   }
-  return { spheres, links: [] };
+  const animate = time => {
+    const yaw = .26 + Math.sin(time * .09) * .1, shift = time * flow * .35;
+    const spheres = [], links = [], fades = [], strand = [];
+    for (let i = 0; i < pairs; i++) {
+      const u = (((i + shift) % pairs) + pairs) % pairs, f = u / pairs;
+      const fade = smooth(Math.min(f, 1 - f) / .09);
+      const theta = f * turns * TAU + time * spin;
+      fades.push(fade); strand.push(u);
+      for (let k = 0; k < 2; k++) {
+        const phi = theta + k * groove, item = identities[2 * i + k];
+        const [x, y, z] = orient((f - .5) * length, reach * Math.cos(phi), reach * Math.sin(phi), yaw, .1, roll);
+        spheres.push({ ...item, x, y, z, r: fade < .08 ? 0 : item.size * fade });
+      }
+      links.push([identities[2 * i].id, identities[2 * i + 1].id, fade * fade]);
+    }
+    if (backbone) {
+      for (let i = 0; i < pairs; i++) {
+        const j = (i + 1) % pairs;
+        // Skip the one neighbour pair that straddles the wrap.
+        if (strand[j] < strand[i]) continue;
+        const opacity = .55 * Math.min(fades[i], fades[j]) ** 2;
+        for (let k = 0; k < 2; k++) links.push([identities[2 * i + k].id, identities[2 * j + k].id, opacity]);
+      }
+    }
+    return { spheres, links };
+  };
+  return { ...animate(0), animate };
 }
 
 function cloud(state, seed) {
@@ -266,9 +358,12 @@ function compass(state, seed) {
   return { spheres, links: [[spheres[1].id, spheres[0].id], [spheres[0].id, spheres[opposite].id]] };
 }
 
-const generators = { clusters, rings, loop, cloud, grid, compass };
+const generators = { clusters, rings, loop, cloud, grid, compass, helix };
 
-/** Return deterministic base geometry without applying any animation. */
+/**
+ * Return deterministic base geometry without applying any animation. Formations
+ * whose positions travel over time (loop, helix) also return animate(time).
+ */
 export function generateFormation(state = {}) {
   const generator = generators[state.formation] || clusters;
   return generator(state, state.seed ?? 17);

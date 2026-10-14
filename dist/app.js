@@ -4,9 +4,11 @@ import { createMorph, sampleMorph, isMorphComplete, MORPH_DURATION_MS } from './
 
 const defaults = {
   formation: 'clusters', motion: 'sweep', nodes: 2, ringCount: 6,
-  waveHeight: .6, loopDensity: 1, cloudDensity: 3, gridSize: 5,
-  sphereCount: 12, drift: true, speed: 1.2, spread: 2.8, lift: 1, seed: 7283,
-  loopLayoutVersion: 2
+  loopDepth: .42, loopDensity: 1, loopWaves: 2, loopFlow: .25, cloudDensity: 3, gridSize: 5,
+  sphereCount: 12, pairs: 14, turns: 1.4, helixFlow: .35, spin: .12, groove: 150, helixTilt: -32,
+  backbone: true, strandColour: true,
+  drift: true, speed: 1.2, spread: 2.8, lift: 1, seed: 7283,
+  loopLayoutVersion: 3
 };
 const storageKey = 'sphere-studies-v1';
 const densityNames = ['Sparse', 'Medium', 'Dense', 'Very dense'];
@@ -14,8 +16,16 @@ const motionNames = ['wind', 'ripple', 'sweep', 'around', 'flicker'];
 const parameterSpecs = {
   nodes: { label: 'Nodes', min: 1, max: 5, step: 1 },
   ringCount: { label: 'Ring count', min: 1, max: 8, step: 1 },
-  waveHeight: { label: 'Wave height', min: 0, max: 2.5, step: .05, decimals: 2 },
+  loopDepth: { label: 'Wave depth', min: 0, max: 1, step: .01, decimals: 2 },
   loopDensity: { label: 'Density', min: 0, max: 3, step: 1, density: true },
+  loopWaves: { label: 'Waves per loop', min: 1, max: 4, step: 1 },
+  loopFlow: { label: 'Flow along loop', min: 0, max: 1, step: .01, decimals: 2 },
+  pairs: { label: 'Base pairs', min: 6, max: 24, step: 1 },
+  turns: { label: 'Turns', min: .5, max: 3, step: .05, decimals: 2 },
+  helixFlow: { label: 'Flow along strand', min: 0, max: 1.5, step: .01, decimals: 2 },
+  spin: { label: 'Spin', min: 0, max: .6, step: .01, decimals: 2 },
+  groove: { label: 'Groove angle', min: 90, max: 180, step: 1, unit: '°' },
+  helixTilt: { label: 'Axis tilt', min: -70, max: 70, step: 1, unit: '°' },
   cloudDensity: { label: 'Density', min: 0, max: 3, step: 1, density: true },
   gridSize: { label: 'Grid size', min: 3, max: 12, step: 1 },
   sphereCount: { label: 'Sphere count', min: 4, max: 24, step: 1 },
@@ -23,7 +33,12 @@ const parameterSpecs = {
   spread: { label: 'Wave spread', min: .5, max: 6, step: .1, decimals: 2 },
   lift: { label: 'Lift', min: 0, max: 2, step: .05, decimals: 2 }
 };
-const formParameters = { clusters: ['nodes'], rings: ['ringCount'], loop: ['waveHeight', 'loopDensity'], cloud: ['cloudDensity'], grid: ['gridSize'], compass: ['sphereCount'] };
+const toggleSpecs = { backbone: 'Backbone lines', strandColour: 'Colour by strand' };
+const formParameters = {
+  clusters: ['nodes'], rings: ['ringCount'], loop: ['loopDepth', 'loopDensity', 'loopWaves', 'loopFlow'],
+  cloud: ['cloudDensity'], grid: ['gridSize'], compass: ['sphereCount'],
+  helix: ['pairs', 'turns', 'helixFlow', 'spin', 'groove', 'helixTilt', 'backbone', 'strandColour']
+};
 
 function restore() {
   let saved;
@@ -32,16 +47,15 @@ function restore() {
   if (!saved || typeof saved !== 'object') return next;
   if (FORMATIONS.some(f => f.id === saved.formation)) next.formation = saved.formation;
   if (motionNames.includes(saved.motion)) next.motion = saved.motion;
-  if (typeof saved.drift === 'boolean') next.drift = saved.drift;
+  for (const key of ['drift', ...Object.keys(toggleSpecs)]) if (typeof saved[key] === 'boolean') next[key] = saved[key];
   if (Number.isInteger(saved.seed)) next.seed = saved.seed >>> 0;
   for (const [key, spec] of Object.entries(parameterSpecs)) {
     if (Number.isFinite(saved[key])) next[key] = Math.min(spec.max, Math.max(spec.min, Math.round(saved[key] / spec.step) * spec.step));
   }
-  // Replace legacy experimental loop settings once when loading the measured
-  // reference layout. Further user changes are retained normally.
+  // Reset loop settings once when loading the 3D loop layout.
+  // Further user changes are retained normally.
   if (saved.loopLayoutVersion !== defaults.loopLayoutVersion) {
-    next.waveHeight = defaults.waveHeight;
-    next.loopDensity = defaults.loopDensity;
+    for (const key of ['loopDepth', 'loopDensity', 'loopWaves', 'loopFlow']) next[key] = defaults[key];
   }
   return next;
 }
@@ -50,7 +64,9 @@ const state = restore();
 let formation = generateFormation(state);
 let renderer;
 let playing = !matchMedia('(prefers-reduced-motion: reduce)').matches;
-let time = 0, presentationTime = 0, lastFrame = performance.now();
+// geometryTime drives formations whose positions travel (loop, helix). It only
+// advances while formation drift is on, so toggling drift never jumps.
+let time = 0, geometryTime = 0, presentationTime = 0, lastFrame = performance.now();
 let formationMorph = null, lastScene = null;
 let motionSource = null, motionTargetStart = null, motionChangedAt = 0;
 let frameHandle = 0;
@@ -59,7 +75,7 @@ const canvas = $('artwork');
 const smooth = v => { const x = Math.max(0, Math.min(1, v)); return x * x * (3 - 2 * x); };
 
 function persist() { try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch { /* Private browsing can disable storage. */ } }
-function format(key) { const spec = parameterSpecs[key]; return spec.density ? densityNames[state[key]] : spec.decimals ? state[key].toFixed(spec.decimals) : String(state[key]); }
+function format(key) { const spec = parameterSpecs[key]; return spec.density ? densityNames[state[key]] : (spec.decimals ? state[key].toFixed(spec.decimals) : String(state[key])) + (spec.unit || ''); }
 
 function addParameter(key, parent, isGeometry) {
   const spec = parameterSpecs[key];
@@ -92,9 +108,25 @@ function addParameter(key, parent, isGeometry) {
   heading.append(label, output); row.append(heading, input); parent.append(row);
 }
 
+function addToggle(key, parent) {
+  const row = document.createElement('label');
+  row.className = 'drift-row toggle-row';
+  row.htmlFor = `toggle-${key}`;
+  const text = document.createElement('span');
+  text.textContent = toggleSpecs[key];
+  const control = document.createElement('span');
+  control.className = 'switch';
+  const input = document.createElement('input');
+  input.type = 'checkbox'; input.id = `toggle-${key}`; input.checked = state[key];
+  const track = document.createElement('span');
+  track.className = 'switch-track'; track.setAttribute('aria-hidden', 'true');
+  control.append(input, track); row.append(text, control); parent.append(row);
+  input.addEventListener('change', () => { state[key] = input.checked; rebuild(true, 420); persist(); });
+}
+
 function updateFormControls() {
   $('form-controls').replaceChildren();
-  formParameters[state.formation].forEach(key => addParameter(key, $('form-controls'), true));
+  formParameters[state.formation].forEach(key => key in toggleSpecs ? addToggle(key, $('form-controls')) : addParameter(key, $('form-controls'), true));
 }
 function updateInterface() {
   document.querySelectorAll('[data-formation]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.formation === state.formation)));
@@ -157,12 +189,13 @@ function evaluateSphereMotion(sphere) {
 }
 
 function evaluateScene() {
-  const moved = formation.spheres.map(sphere => {
+  const base = formation.animate ? formation.animate(geometryTime) : formation;
+  const moved = base.spheres.map(sphere => {
     const m = evaluateSphereMotion(sphere);
     return { ...sphere, x: sphere.x + m.dx, y: sphere.y + m.dy, z: sphere.z + m.dz, phase: m.phase, tilt: m.tilt };
   });
   // Compass needle rotates independently of the material and keeps the geometry switch meaningful.
-  let links = formation.links;
+  let links = base.links;
   if (state.formation === 'compass') {
     const angle = state.drift ? time * .12 : 0;
     moved.unshift({ id: '__needle-a', x: -.74 * Math.cos(angle), y: -.74 * Math.sin(angle), z: -1, r: 0, phase: 0, tilt: 0, palette: 0 });
@@ -186,6 +219,7 @@ function frame(now) {
   lastFrame = now;
   if (playing && !document.hidden) {
     time += dt * (state.motion === 'flicker' ? 1.2 : state.speed);
+    if (state.drift) geometryTime += dt;
     presentationTime += dt * 1000;
   }
   if (playing && !document.hidden) draw(now);
@@ -234,7 +268,7 @@ $('reset-study')?.addEventListener('click', () => {
 document.addEventListener('keydown', event => {
   if (/INPUT|BUTTON|TEXTAREA|SUMMARY|SELECT/.test(event.target.tagName)) return;
   if (event.code === 'Space') { event.preventDefault(); togglePlayback(); }
-  if (/^[1-6]$/.test(event.key)) selectFormation(FORMATIONS[Number(event.key) - 1].id);
+  if (/^[1-7]$/.test(event.key)) selectFormation(FORMATIONS[Number(event.key) - 1].id);
 });
 document.addEventListener('visibilitychange', () => { lastFrame = performance.now(); });
 updateFormControls();

@@ -7,25 +7,41 @@ uniform vec2 u_resolution;
 uniform vec2 u_origin;
 uniform float u_scale;
 uniform float u_reveal;
+uniform float u_lens;
+uniform float u_mode;
 varying vec2 v_uv;
 varying vec3 v_material;
 varying float v_size;
+varying float v_z;
+varying float v_r;
 void main() {
-  float perspective = 1.0 + a_sphere.z * .12;
+  // Depth mode projects centres through a pinhole camera; the legacy mode only scales radii.
+  float projection = u_mode > .5 ? u_lens / (u_lens - a_sphere.z) : 1.;
+  float perspective = u_mode > .5 ? projection : 1.0 + a_sphere.z * .12;
   float radius = a_sphere.w * u_scale * perspective * u_reveal;
-  vec2 center = u_origin + vec2(a_sphere.x, -a_sphere.y) * u_scale;
-  vec2 pixel = center + vec2(a_corner.x, -a_corner.y) * radius;
+  vec2 center = u_origin + vec2(a_sphere.x, -a_sphere.y) * u_scale * projection;
+  // One extra pixel keeps the antialiased rim inside the quad.
+  float extent = radius + 1.;
+  vec2 pixel = center + vec2(a_corner.x, -a_corner.y) * extent;
   gl_Position = vec4(pixel / u_resolution * vec2(2., -2.) + vec2(-1., 1.), 0., 1.);
-  v_uv = a_corner;
+  v_uv = a_corner * extent / max(radius, 1e-4);
   v_material = a_material;
   v_size = radius;
+  v_z = a_sphere.z;
+  v_r = a_sphere.w * u_reveal;
 }`;
 
+// Each quad ray-casts a sphere. With EXT_frag_depth it writes the surface's true
+// depth, so overlapping spheres intersect along a continuous curve instead of
+// swapping draw order when their centres cross.
 const sphereFragment = `
 precision highp float;
 varying vec2 v_uv;
 varying vec3 v_material;
 varying float v_size;
+varying float v_z;
+varying float v_r;
+uniform float u_depthScale;
 void main() {
   float rr = dot(v_uv, v_uv);
   if (rr > 1.) discard;
@@ -61,23 +77,36 @@ void main() {
   vec3 surface = mix(grey, color, mask);
   float aa = 1.5 / max(v_size, 1.);
   float alpha = 1. - smoothstep(1. - aa, 1., radial);
+#ifdef DEPTH
+  gl_FragDepthEXT = clamp(.5 - (v_z + v_r * n.z) * u_depthScale, 0., 1.);
+#endif
   gl_FragColor = vec4(surface, alpha);
 }`;
 
 const lineVertex = `
 precision highp float;
-attribute vec2 a_position;
+attribute vec3 a_position;
 attribute float a_opacity;
 uniform vec2 u_resolution;
 uniform vec2 u_origin;
 uniform float u_scale;
+uniform float u_lens;
+uniform float u_mode;
+uniform float u_depthScale;
 varying float v_opacity;
 void main() {
-  vec2 p = u_origin + a_position * vec2(1., -1.) * u_scale;
-  gl_Position = vec4(p / u_resolution * vec2(2., -2.) + vec2(-1., 1.), 0., 1.);
+  float projection = u_mode > .5 ? u_lens / (u_lens - a_position.z) : 1.;
+  vec2 p = u_origin + a_position.xy * vec2(1., -1.) * u_scale * projection;
+  // Same depth mapping as the sphere surfaces, so lines pass behind or in front correctly.
+  float depth = u_mode > .5 ? -2. * a_position.z * u_depthScale : 0.;
+  gl_Position = vec4(p / u_resolution * vec2(2., -2.) + vec2(-1., 1.), depth, 1.);
   v_opacity = a_opacity;
 }`;
 const lineFragment = `precision mediump float; varying float v_opacity; void main() { gl_FragColor = vec4(.46, .47, .49, .26 * v_opacity); }`;
+
+// Camera distance in scene units, and the factor mapping scene z (±2.5) into the depth buffer.
+const CAMERA_DISTANCE = 5;
+const DEPTH_SCALE = .18;
 
 function program(gl, vertex, fragment) {
   const shaders = [gl.VERTEX_SHADER, gl.FRAGMENT_SHADER].map((type, i) => {
@@ -98,10 +127,13 @@ function program(gl, vertex, fragment) {
 export class SphereRenderer {
   constructor(canvas) {
     this.canvas = canvas;
-    this.gl = canvas.getContext('webgl', { alpha: false, antialias: true, preserveDrawingBuffer: true });
+    this.gl = canvas.getContext('webgl', { alpha: false, antialias: true, depth: true, preserveDrawingBuffer: true });
     if (!this.gl) throw new Error('This study needs WebGL. Enable graphics acceleration in your browser and reload.');
     const gl = this.gl;
-    this.sphereProgram = program(gl, sphereVertex, sphereFragment);
+    // Without per-pixel depth the renderer falls back to sorting flat discs by centre.
+    this.depthCorrect = Boolean(gl.getExtension('EXT_frag_depth'));
+    const fragment = this.depthCorrect ? `#extension GL_EXT_frag_depth : enable\n#define DEPTH\n${sphereFragment}` : sphereFragment;
+    this.sphereProgram = program(gl, sphereVertex, fragment);
     this.lineProgram = program(gl, lineVertex, lineFragment);
     this.sphereBuffer = gl.createBuffer();
     this.lineBuffer = gl.createBuffer();
@@ -110,7 +142,7 @@ export class SphereRenderer {
     this.lineOpacityAttribute = gl.getAttribLocation(this.lineProgram, 'a_opacity');
     this.uniforms = new Map();
     for (const p of [this.sphereProgram, this.lineProgram]) {
-      this.uniforms.set(p, Object.fromEntries(['u_resolution', 'u_origin', 'u_scale', 'u_reveal'].map(n => [n, gl.getUniformLocation(p, n)])));
+      this.uniforms.set(p, Object.fromEntries(['u_resolution', 'u_origin', 'u_scale', 'u_reveal', 'u_lens', 'u_mode', 'u_depthScale'].map(n => [n, gl.getUniformLocation(p, n)])));
     }
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -137,34 +169,40 @@ export class SphereRenderer {
     gl.uniform2f(u.u_origin, ...this.origin);
     gl.uniform1f(u.u_scale, this.scale);
     if (u.u_reveal) gl.uniform1f(u.u_reveal, reveal);
+    gl.uniform1f(u.u_lens, CAMERA_DISTANCE);
+    gl.uniform1f(u.u_mode, this.depthCorrect ? 1 : 0);
+    if (u.u_depthScale) gl.uniform1f(u.u_depthScale, DEPTH_SCALE);
   }
 
-  draw(spheres, links, reveal = 1) {
+  drawLines(spheres, links) {
+    if (!links.length) return;
     const gl = this.gl;
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    if (links.length) {
-      this.bindScene(this.lineProgram);
-      const points = new Map(spheres.map(s => [s.id, s]));
-      const lines = [];
-      for (const [a, b, opacity = 1] of links) {
-        const p = points.get(a), q = points.get(b);
-        if (p && q) lines.push(p.x, p.y, opacity, q.x, q.y, opacity);
-      }
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.lineBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lines), gl.DYNAMIC_DRAW);
-      gl.enableVertexAttribArray(this.lineAttribute);
-      gl.vertexAttribPointer(this.lineAttribute, 2, gl.FLOAT, false, 12, 0);
-      gl.enableVertexAttribArray(this.lineOpacityAttribute);
-      gl.vertexAttribPointer(this.lineOpacityAttribute, 1, gl.FLOAT, false, 12, 8);
-      gl.drawArrays(gl.LINES, 0, lines.length / 3);
-      gl.disableVertexAttribArray(this.lineAttribute);
-      gl.disableVertexAttribArray(this.lineOpacityAttribute);
+    this.bindScene(this.lineProgram);
+    const points = new Map(spheres.map(s => [s.id, s]));
+    const lines = [];
+    for (const [a, b, opacity = 1] of links) {
+      const p = points.get(a), q = points.get(b);
+      if (p && q && opacity > .005) lines.push(p.x, p.y, p.z || 0, opacity, q.x, q.y, q.z || 0, opacity);
     }
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.lineBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lines), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(this.lineAttribute);
+    gl.vertexAttribPointer(this.lineAttribute, 3, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(this.lineOpacityAttribute);
+    gl.vertexAttribPointer(this.lineOpacityAttribute, 1, gl.FLOAT, false, 16, 12);
+    gl.drawArrays(gl.LINES, 0, lines.length / 4);
+    gl.disableVertexAttribArray(this.lineAttribute);
+    gl.disableVertexAttribArray(this.lineOpacityAttribute);
+  }
+
+  drawSpheres(spheres, reveal) {
+    const gl = this.gl;
     this.bindScene(this.sphereProgram, reveal);
     const corners = [-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1];
-    const data = new Float32Array(spheres.length * 6 * 9);
+    // Back-to-front order still matters for the translucent antialiased rims.
+    const sorted = spheres.filter(s => s.r > .0005).sort((a, b) => a.z - b.z);
+    const data = new Float32Array(sorted.length * 6 * 9);
     let index = 0;
-    const sorted = spheres.slice().sort((a, b) => a.z - b.z);
     for (const s of sorted) {
       for (let corner = 0; corner < 6; corner++) {
         data.set([s.x, s.y, s.z, s.r, s.phase, s.tilt, s.palette, corners[corner * 2], corners[corner * 2 + 1]], index);
@@ -178,7 +216,26 @@ export class SphereRenderer {
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 36, offset);
     }
-    gl.drawArrays(gl.TRIANGLES, 0, spheres.length * 6);
+    gl.drawArrays(gl.TRIANGLES, 0, sorted.length * 6);
     Object.values(this.attributes).forEach(loc => gl.disableVertexAttribArray(loc));
+  }
+
+  draw(spheres, links, reveal = 1) {
+    const gl = this.gl;
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    if (this.depthCorrect) {
+      // Spheres write depth first; lines are then depth-tested without writing.
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.depthMask(true);
+      this.drawSpheres(spheres, reveal);
+      gl.depthMask(false);
+      this.drawLines(spheres, links);
+      gl.depthMask(true);
+    } else {
+      gl.disable(gl.DEPTH_TEST);
+      this.drawLines(spheres, links);
+      this.drawSpheres(spheres, reveal);
+    }
   }
 }
