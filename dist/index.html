@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f1f1f1" />
+    <meta name="description" content="A generative playground of moving color, spherical surfaces, and procedural formations." />
+    <title>Sphere Studies — Form & Motion</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <canvas id="artwork" aria-label="Animated generative artwork made from spheres"></canvas>
+
+    <header class="study-heading">
+      <h1>SPHERE <span>/</span> STUDIES</h1>
+      <p>A playground for form &amp; motion</p>
+    </header>
+
+    <aside id="controls-panel" class="controls-panel" aria-label="Artwork controls">
+      <div class="panel-heading">
+        <span>CONTROLS</span>
+        <button id="close-panel" class="icon-button close-button" type="button" aria-label="Hide controls" title="Hide controls">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 6 8 8M14 6l-8 8" /></svg>
+        </button>
+      </div>
+
+      <details id="form-section" class="control-section" open>
+        <summary>FORM <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m4 5 2 2 2-2" /></svg></summary>
+        <div id="form-controls" class="section-content"></div>
+      </details>
+
+      <details id="motion-section" class="control-section" open>
+        <summary>MOTION <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m4 5 2 2 2-2" /></svg></summary>
+        <div class="section-content motion-content">
+          <div id="motion-buttons" class="motion-buttons" role="group" aria-label="Motion pattern">
+            <button type="button" data-motion="wind" aria-pressed="false">Wind</button>
+            <button type="button" data-motion="ripple" aria-pressed="false">Ripple</button>
+            <button type="button" data-motion="sweep" aria-pressed="true">Sweep</button>
+            <button type="button" data-motion="around" aria-pressed="false">Around</button>
+            <button type="button" data-motion="flicker" aria-pressed="false">Flicker</button>
+          </div>
+          <label class="drift-row" for="drift-switch">
+            <span>Formation drift</span>
+            <span class="switch"><input id="drift-switch" type="checkbox" checked /><span class="switch-track" aria-hidden="true"></span></span>
+          </label>
+          <div id="wave-controls"></div>
+        </div>
+      </details>
+
+      <div class="panel-footer">
+        <button id="randomize" class="randomize-button" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h2.1c4.3 0 5.5 10 9.8 10H17m-3-3 3 3-3 3M3 15h2.1c1.5 0 2.7-1.3 3.8-3.1m2.2-3.8C12.2 6.3 13.4 5 14.9 5H17m-3-3 3 3-3 3" /></svg>
+          <span>Randomize</span>
+        </button>
+      </div>
+    </aside>
+
+    <button id="open-panel" class="open-panel-button" type="button" hidden aria-label="Show controls" title="Show controls">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5h12M4 10h12M4 15h12" /><circle cx="8" cy="5" r="1.5" /><circle cx="13" cy="10" r="1.5" /><circle cx="7" cy="15" r="1.5" /></svg>
+      <span>Controls</span>
+    </button>
+
+    <nav id="formation-dock" class="formation-dock" aria-label="Choose a formation">
+      <button type="button" data-formation="clusters" title="Connected clusters" aria-label="Connected clusters" aria-pressed="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 6 6 6 4-7M13 12l5 6M13 12l-8 6M7 6l-2 12" /><circle cx="7" cy="6" r="2" /><circle cx="17" cy="5" r="1.5" /><circle cx="13" cy="12" r="2.4" /><circle cx="5" cy="18" r="1.7" /><circle cx="18" cy="18" r="2" /></svg>
+      </button>
+      <button type="button" data-formation="rings" title="Concentric rings" aria-label="Concentric rings" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="5.5" /><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r=".5" /></svg>
+      </button>
+      <button type="button" data-formation="loop" title="Wave-like loop" aria-label="Wave-like loop" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.8 13.5c-1.5-4.4 4.6-8 7.3-5.7 2.8 2.5 4.6-3.3 7.4-.4 4.1 4.2-2 9.1-5.9 8.7-3.8-.4-7.1 1.8-8.8-2.6Z" /><circle cx="5" cy="9.5" r="1" /><circle cx="17.5" cy="15" r="1" /></svg>
+      </button>
+      <button type="button" data-formation="cloud" title="Scattered cloud" aria-label="Scattered cloud" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7" cy="6" r="1.1" /><circle cx="14" cy="4.5" r="1" /><circle cx="18.5" cy="9" r="1.4" /><circle cx="11.5" cy="10.5" r="1.2" /><circle cx="4.5" cy="12.5" r="1" /><circle cx="8" cy="18.5" r="1.3" /><circle cx="15" cy="17" r="1" /><circle cx="20" cy="17.5" r=".9" /></svg>
+      </button>
+      <button type="button" data-formation="grid" title="Square grid" aria-label="Square grid" aria-pressed="false">
+        <svg class="grid-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="1" /><circle cx="12" cy="6" r="1" /><circle cx="18" cy="6" r="1" /><circle cx="6" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="18" cy="12" r="1" /><circle cx="6" cy="18" r="1" /><circle cx="12" cy="18" r="1" /><circle cx="18" cy="18" r="1" /></svg>
+      </button>
+      <button type="button" data-formation="compass" title="Compass" aria-label="Compass" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="m15.8 8.2-2.1 5.5-5.5 2.1 2.1-5.5 5.5-2.1Z" /><circle cx="12" cy="12" r="1" /></svg>
+      </button>
+    </nav>
+
+    <div id="formation-caption" class="formation-caption">
+      <span id="formation-name">Connected clusters</span>
+      <small id="sphere-count">12 spheres</small>
+    </div>
+
+    <div class="utility-controls">
+      <button id="pause-toggle" class="pause-button" type="button" aria-label="Pause animation" aria-pressed="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4v8M10.5 4v8" /></svg>
+        <span>Pause</span>
+      </button>
+      <span class="utility-divider" aria-hidden="true"></span>
+      <button id="export-image" class="icon-button export-button" type="button" title="Save image" aria-label="Save image">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m-3-3 3 3 3-3M4 12v4h12v-4" /></svg>
+      </button>
+    </div>
+
+    <div id="notification" class="notification" role="status" aria-live="polite"></div>
+    <div id="renderer-error" class="renderer-error" role="alert" hidden></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
