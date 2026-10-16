@@ -3,9 +3,9 @@
  * Coordinates and radii are in scene units; phase and tilt are radians.
  * The surface field is independent of the optional positional drift.
  */
-const TAU = Math.PI * 2;
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-const number = (v, fallback) => Number.isFinite(Number(v)) ? Number(v) : fallback;
+import { TAU, clamp, number, hash, random, density, sphere, smooth } from './common.js';
+import { solar } from './solar.js';
+import { flower } from './flower.js';
 
 export const FORMATIONS = Object.freeze([
   { id: 'clusters', label: 'Connected clusters' },
@@ -15,54 +15,9 @@ export const FORMATIONS = Object.freeze([
   { id: 'grid', label: 'Square grid' },
   { id: 'compass', label: 'Compass ring' },
   { id: 'helix', label: 'DNA helix' },
+  { id: 'solar', label: 'Solar system' },
+  { id: 'flower', label: 'Cosmos flower' },
 ].map(Object.freeze));
-
-function hash(value) {
-  const str = String(value);
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  h ^= h >>> 16;
-  h = Math.imul(h, 0x85ebca6b);
-  h ^= h >>> 13;
-  return h >>> 0;
-}
-
-function random(seed) {
-  let value = hash(seed);
-  return () => {
-    value += 0x6d2b79f5;
-    let t = value;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function density(value, counts, fallback = 1) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    if (value >= counts[0]) return Math.round(clamp(value, counts[0], counts.at(-1)));
-    return counts[Math.round(clamp(value, 0, counts.length - 1))];
-  }
-  const key = String(value ?? '').toLowerCase().replace(/[\s_-]/g, '');
-  const presets = { sparse: 0, low: 0, medium: 1, normal: 1, dense: 2, high: 2, verydense: 3 };
-  if (key in presets) return counts[presets[key]];
-  if (key !== '' && Number.isFinite(Number(key))) return density(Number(key), counts, fallback);
-  return counts[fallback];
-}
-
-/** Sphere identities retain their palette/offset when a parameter changes. */
-function sphere(formation, seed, index, x, y, z, r) {
-  const rand = random(`${seed}/${formation}/${index}`);
-  return {
-    id: `${formation}-${index}`,
-    x, y, z, r,
-    palette: rand(),
-    offset: rand() * TAU,
-  };
-}
 
 function fit(points, extent = 0.92) {
   let bounds = 0;
@@ -137,7 +92,6 @@ function rings(state, seed) {
   return { spheres, links: [] };
 }
 
-const smooth = v => { const x = clamp(v, 0, 1); return x * x * (3 - 2 * x); };
 // Rotate a point by yaw (about y), then pitch (about x), then roll (in the screen plane).
 function orient(x, y, z, yaw, pitch, roll) {
   let c = Math.cos(yaw), s = Math.sin(yaw);
@@ -358,11 +312,13 @@ function compass(state, seed) {
   return { spheres, links: [[spheres[1].id, spheres[0].id], [spheres[0].id, spheres[opposite].id]] };
 }
 
-const generators = { clusters, rings, loop, cloud, grid, compass, helix };
+const generators = { clusters, rings, loop, cloud, grid, compass, helix, solar, flower };
 
 /**
  * Return deterministic base geometry without applying any animation. Formations
- * whose positions travel over time (loop, helix) also return animate(time).
+ * whose positions travel over time (loop, helix, solar, flower) also return
+ * animate(time, clocks). Solar and flower declare clock rates that the app
+ * integrates, so changing a speed slider never makes the scene jump.
  */
 export function generateFormation(state = {}) {
   const generator = generators[state.formation] || clusters;

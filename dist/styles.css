@@ -158,3 +158,15 @@ svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.2; strok
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .001ms !important; animation-duration: .001ms !important; }
 }
+
+/* Formations with a reference backdrop (space, teal) switch the canvas text to light ink. */
+body[data-backdrop="dark"] .study-heading h1 { color: #ececf0; }
+body[data-backdrop="dark"] .study-heading h1 span { color: #8d8d95; }
+body[data-backdrop="dark"] .study-heading p { color: #b4b4bb; }
+body[data-backdrop="dark"] .formation-caption > span { color: #e2e2e7; }
+body[data-backdrop="dark"] .formation-caption small { color: #a9a9b1; }
+body[data-backdrop="dark"] .pause-button, body[data-backdrop="dark"] .export-button { color: #c4c4ca; }
+body[data-backdrop="dark"] .pause-button:hover, body[data-backdrop="dark"] .export-button:hover { color: #fff; }
+body[data-backdrop="dark"] .utility-divider { background: rgba(255,255,255,.22); }
+body[data-backdrop="dark"] .controls-panel, body[data-backdrop="dark"] .open-panel-button { background: rgba(246,246,248,.9); }
+body[data-backdrop="dark"] .formation-dock { background: rgba(246,246,248,.86); }

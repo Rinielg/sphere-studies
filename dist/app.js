@@ -7,6 +7,10 @@ const defaults = {
   loopDepth: .42, loopDensity: 1, loopWaves: 2, loopFlow: .25, cloudDensity: 3, gridSize: 5,
   sphereCount: 12, pairs: 14, turns: 1.4, helixFlow: .35, spin: .12, groove: 150, helixTilt: -32,
   backbone: true, strandColour: true,
+  solarDays: 12, solarSpin: .5, solarDistance: .12, solarSize: .15, solarElevation: 14,
+  solarAligned: true, solarPaths: true, solarNatural: true, solarLight: true, solarBackdrop: true,
+  flowerPetals: 8, flowerDetail: 1, flowerOpen: .55, flowerSway: .45, flowerFlutter: .4, flowerBreeze: .7, flowerView: 48,
+  flowerStem: true, flowerNatural: true, flowerBackdrop: true,
   drift: true, speed: 1.2, spread: 2.8, lift: 1, seed: 7283,
   loopLayoutVersion: 3
 };
@@ -29,15 +33,35 @@ const parameterSpecs = {
   cloudDensity: { label: 'Density', min: 0, max: 3, step: 1, density: true },
   gridSize: { label: 'Grid size', min: 3, max: 12, step: 1 },
   sphereCount: { label: 'Sphere count', min: 4, max: 24, step: 1 },
+  solarDays: { label: 'Days per second', min: 0, max: 120, step: 1 },
+  solarSpin: { label: 'Rotation (Earth days/s)', min: 0, max: 2, step: .01, decimals: 2 },
+  solarDistance: { label: 'Distance realism', min: 0, max: 1, step: .01, decimals: 2 },
+  solarSize: { label: 'Size realism', min: 0, max: 1, step: .01, decimals: 2 },
+  solarElevation: { label: 'Camera elevation', min: 3, max: 90, step: 1, unit: '°' },
+  flowerPetals: { label: 'Petals', min: 5, max: 13, step: 1 },
+  flowerDetail: { label: 'Detail', min: 0, max: 3, step: 1, density: true },
+  flowerOpen: { label: 'Bloom', min: 0, max: 1, step: .01, decimals: 2 },
+  flowerSway: { label: 'Stem sway', min: 0, max: 1, step: .01, decimals: 2 },
+  flowerFlutter: { label: 'Petal flutter', min: 0, max: 1, step: .01, decimals: 2 },
+  flowerBreeze: { label: 'Breeze speed', min: 0, max: 2, step: .01, decimals: 2 },
+  flowerView: { label: 'Viewing angle', min: 0, max: 85, step: 1, unit: '°' },
   speed: { label: 'Wave speed', min: .1, max: 3, step: .05, decimals: 2 },
   spread: { label: 'Wave spread', min: .5, max: 6, step: .1, decimals: 2 },
   lift: { label: 'Lift', min: 0, max: 2, step: .05, decimals: 2 }
 };
-const toggleSpecs = { backbone: 'Backbone lines', strandColour: 'Colour by strand' };
+const toggleSpecs = {
+  backbone: 'Backbone lines', strandColour: 'Colour by strand',
+  solarAligned: 'Start aligned', solarPaths: 'Orbit paths', solarNatural: 'Natural colour', solarLight: 'Sunlight', solarBackdrop: 'Space backdrop',
+  flowerStem: 'Stem', flowerNatural: 'Natural colour', flowerBackdrop: 'Reference backdrop'
+};
+// Toggling these restarts the formation's clocks, so the starting arrangement is visible.
+const clockResetKeys = new Set(['solarAligned']);
 const formParameters = {
   clusters: ['nodes'], rings: ['ringCount'], loop: ['loopDepth', 'loopDensity', 'loopWaves', 'loopFlow'],
   cloud: ['cloudDensity'], grid: ['gridSize'], compass: ['sphereCount'],
-  helix: ['pairs', 'turns', 'helixFlow', 'spin', 'groove', 'helixTilt', 'backbone', 'strandColour']
+  helix: ['pairs', 'turns', 'helixFlow', 'spin', 'groove', 'helixTilt', 'backbone', 'strandColour'],
+  solar: ['solarDays', 'solarSpin', 'solarDistance', 'solarSize', 'solarElevation', 'solarAligned', 'solarPaths', 'solarNatural', 'solarLight', 'solarBackdrop'],
+  flower: ['flowerPetals', 'flowerDetail', 'flowerOpen', 'flowerSway', 'flowerFlutter', 'flowerBreeze', 'flowerView', 'flowerStem', 'flowerNatural', 'flowerBackdrop']
 };
 
 function restore() {
@@ -67,6 +91,9 @@ let playing = !matchMedia('(prefers-reduced-motion: reduce)').matches;
 // geometryTime drives formations whose positions travel (loop, helix). It only
 // advances while formation drift is on, so toggling drift never jumps.
 let time = 0, geometryTime = 0, presentationTime = 0, lastFrame = performance.now();
+// Formation clocks (solar orbit days, rotation, breeze) integrate their declared
+// rates, so a speed change alters the pace without jumping the scene.
+let clocks = {};
 let formationMorph = null, lastScene = null;
 let motionSource = null, motionTargetStart = null, motionChangedAt = 0;
 let frameHandle = 0;
@@ -121,7 +148,11 @@ function addToggle(key, parent) {
   const track = document.createElement('span');
   track.className = 'switch-track'; track.setAttribute('aria-hidden', 'true');
   control.append(input, track); row.append(text, control); parent.append(row);
-  input.addEventListener('change', () => { state[key] = input.checked; rebuild(true, 420); persist(); });
+  input.addEventListener('change', () => {
+    state[key] = input.checked;
+    if (clockResetKeys.has(key)) clocks = {};
+    rebuild(true, 420); persist();
+  });
 }
 
 function updateFormControls() {
@@ -132,9 +163,16 @@ function updateInterface() {
   document.querySelectorAll('[data-formation]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.formation === state.formation)));
   document.querySelectorAll('[data-motion]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.motion === state.motion)));
   $('drift-switch').checked = state.drift;
-  $('wave-controls').hidden = state.motion === 'flicker';
+  // Formations that drive their own surfaces (planet spin, lit petals) ignore motion patterns.
+  const ownSurface = formation.spheres.every(s => s._morphMarker || Number.isFinite(s.phase));
+  $('motion-buttons').hidden = ownSurface;
+  $('wave-controls').hidden = ownSurface || state.motion === 'flicker';
   $('formation-name').textContent = FORMATIONS.find(f => f.id === state.formation).label;
-  $('sphere-count').textContent = `${formation.spheres.length} spheres`;
+  $('sphere-count').textContent = `${formation.spheres.filter(s => !s._morphMarker).length} spheres`;
+  const scene = formation.scene || {};
+  document.body.dataset.backdrop = scene.dark ? 'dark' : 'light';
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', scene.background
+    ? `rgb(${scene.background.map(c => Math.round(c * 255)).join(',')})` : '#f1f1f1');
 }
 
 function rebuild(animate = true, duration = MORPH_DURATION_MS) {
@@ -150,6 +188,7 @@ function rebuild(animate = true, duration = MORPH_DURATION_MS) {
 function selectFormation(id) {
   if (state.formation === id) return;
   state.formation = id;
+  clocks = {};
   updateFormControls(); rebuild(); persist();
 }
 
@@ -172,6 +211,8 @@ function updatePlayback() {
 function togglePlayback() { playing = !playing; lastFrame = performance.now(); updatePlayback(); }
 
 function evaluateSphereMotion(sphere) {
+  // Formations that set their own surface (planet spin, petal shading) keep it.
+  if (Number.isFinite(sphere.phase)) return { phase: sphere.phase, tilt: sphere.tilt, dx: 0, dy: 0, dz: 0 };
   const transition = smooth((presentationTime - motionChangedAt) / 450);
   const motionState = { ...state, speed: 1 };
   const current = evaluateMotion(sphere, motionState, time);
@@ -189,9 +230,11 @@ function evaluateSphereMotion(sphere) {
 }
 
 function evaluateScene() {
-  const base = formation.animate ? formation.animate(geometryTime) : formation;
+  const base = formation.animate ? formation.animate(geometryTime, clocks) : formation;
   const moved = base.spheres.map(sphere => {
     const m = evaluateSphereMotion(sphere);
+    // Pinned spheres move only with their formation's own physics.
+    if (sphere.pin) return { ...sphere, phase: m.phase, tilt: m.tilt };
     return { ...sphere, x: sphere.x + m.dx, y: sphere.y + m.dy, z: sphere.z + m.dz, phase: m.phase, tilt: m.tilt };
   });
   // Compass needle rotates independently of the material and keeps the geometry switch meaningful.
@@ -211,7 +254,7 @@ function draw() {
   const scene = formationMorph ? sampleMorph(formationMorph, target, presentationTime) : target;
   if (formationMorph && isMorphComplete(formationMorph, presentationTime)) formationMorph = null;
   lastScene = scene;
-  renderer.draw(scene.spheres, scene.links);
+  renderer.draw(scene.spheres, scene.links, 1, formation.scene);
 }
 
 function frame(now) {
@@ -219,7 +262,10 @@ function frame(now) {
   lastFrame = now;
   if (playing && !document.hidden) {
     time += dt * (state.motion === 'flicker' ? 1.2 : state.speed);
-    if (state.drift) geometryTime += dt;
+    if (state.drift) {
+      geometryTime += dt;
+      for (const [key, rate] of Object.entries(formation.clockRates || {})) clocks[key] = (clocks[key] || 0) + dt * rate;
+    }
     presentationTime += dt * 1000;
   }
   if (playing && !document.hidden) draw(now);
@@ -260,7 +306,7 @@ $('export-image').addEventListener('click', () => {
   }, 'image/png');
 });
 $('reset-study')?.addEventListener('click', () => {
-  Object.assign(state, defaults); motionSource = null; motionTargetStart = null; time = 0;
+  Object.assign(state, defaults); motionSource = null; motionTargetStart = null; time = 0; clocks = {};
   updateFormControls(); $('wave-controls').replaceChildren();
   ['speed', 'spread', 'lift'].forEach(key => addParameter(key, $('wave-controls'), false));
   rebuild(); persist(); announce('Parameters reset');
@@ -268,7 +314,7 @@ $('reset-study')?.addEventListener('click', () => {
 document.addEventListener('keydown', event => {
   if (/INPUT|BUTTON|TEXTAREA|SUMMARY|SELECT/.test(event.target.tagName)) return;
   if (event.code === 'Space') { event.preventDefault(); togglePlayback(); }
-  if (/^[1-7]$/.test(event.key)) selectFormation(FORMATIONS[Number(event.key) - 1].id);
+  if (/^[1-9]$/.test(event.key)) selectFormation(FORMATIONS[Number(event.key) - 1].id);
 });
 document.addEventListener('visibilitychange', () => { lastFrame = performance.now(); });
 updateFormControls();
