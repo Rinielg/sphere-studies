@@ -10,7 +10,7 @@ const defaults = {
   solarDays: 12, solarSpin: .5, solarDistance: .12, solarSize: .15, solarElevation: 14,
   solarAligned: true, solarPaths: true, solarNatural: true, solarLight: true, solarBackdrop: true,
   flowerPetals: 8, flowerDetail: 1, flowerOpen: .55, flowerSway: .45, flowerFlutter: .4, flowerBreeze: .7, flowerView: 48,
-  flowerStem: true, flowerNatural: true, flowerBackdrop: true,
+  flowerHalftone: true, flowerStem: true, flowerNatural: true, flowerBackdrop: true,
   drift: true, speed: 1.2, spread: 2.8, lift: 1, seed: 7283,
   loopLayoutVersion: 3
 };
@@ -52,7 +52,7 @@ const parameterSpecs = {
 const toggleSpecs = {
   backbone: 'Backbone lines', strandColour: 'Colour by strand',
   solarAligned: 'Start aligned', solarPaths: 'Orbit paths', solarNatural: 'Natural colour', solarLight: 'Sunlight', solarBackdrop: 'Space backdrop',
-  flowerStem: 'Stem', flowerNatural: 'Natural colour', flowerBackdrop: 'Reference backdrop'
+  flowerHalftone: 'Halftone lattice', flowerStem: 'Stem', flowerNatural: 'Natural colour', flowerBackdrop: 'Reference backdrop'
 };
 // Toggling these restarts the formation's clocks, so the starting arrangement is visible.
 const clockResetKeys = new Set(['solarAligned']);
@@ -61,7 +61,7 @@ const formParameters = {
   cloud: ['cloudDensity'], grid: ['gridSize'], compass: ['sphereCount'],
   helix: ['pairs', 'turns', 'helixFlow', 'spin', 'groove', 'helixTilt', 'backbone', 'strandColour'],
   solar: ['solarDays', 'solarSpin', 'solarDistance', 'solarSize', 'solarElevation', 'solarAligned', 'solarPaths', 'solarNatural', 'solarLight', 'solarBackdrop'],
-  flower: ['flowerPetals', 'flowerDetail', 'flowerOpen', 'flowerSway', 'flowerFlutter', 'flowerBreeze', 'flowerView', 'flowerStem', 'flowerNatural', 'flowerBackdrop']
+  flower: ['flowerPetals', 'flowerDetail', 'flowerOpen', 'flowerSway', 'flowerFlutter', 'flowerBreeze', 'flowerView', 'flowerHalftone', 'flowerStem', 'flowerNatural', 'flowerBackdrop']
 };
 
 function restore() {

@@ -44,7 +44,111 @@ function cubic(p0, p1, p2, p3, t) {
   return p0.map((_, i) => m * m * m * p0[i] + 3 * m * m * t * p1[i] + 3 * m * t * t * p2[i] + t * t * t * p3[i]);
 }
 
+/**
+ * Halftone lattice: a fixed grid of spheres in a tilted plane whose radii encode
+ * the flower's tone, like a halftone print. Positions never leave the grid; the
+ * petals' flutter, the bloom and the stem's sway move through the size field.
+ */
+function halftone(state, seed) {
+  const petals = Math.round(clamp(number(state.flowerPetals, 8), 5, 13));
+  const detail = Math.round(clamp(number(state.flowerDetail, 1), 0, 3));
+  const openness = clamp(number(state.flowerOpen, .55), 0, 1);
+  const sway = clamp(number(state.flowerSway, .45), 0, 1);
+  const flutter = clamp(number(state.flowerFlutter, .4), 0, 1);
+  const view = clamp(number(state.flowerView, 48), 0, 85) * DEG;
+  const stem = state.flowerStem !== false, natural = state.flowerNatural !== false;
+  const backdrop = state.flowerBackdrop !== false;
+
+  const n = [24, 34, 44, 56][detail], extent = .94, step = 2 * extent / (n - 1);
+  const centre = [0, .18], inner = .11, disc = .1;
+  const length = .48 + .16 * openness, width = .15 * Math.min(1.5, (8 / petals) ** .85) * (.85 + .3 * openness);
+  const shapes = Array.from({ length: petals }, (_, i) => {
+    const rand = random(`${seed}/petal/${i}`);
+    // Offset by half a petal so none lies over the stem.
+    return { angle: Math.PI / 2 + TAU * (i + .5) / petals + (rand() - .5) * .16, scaleL: .9 + rand() * .2, scaleW: .9 + rand() * .2, phase: rand() * TAU };
+  });
+  const cells = [];
+  for (let row = 0; row < n; row++) {
+    for (let col = 0; col < n; col++) {
+      const item = sphere('flower', seed, row * n + col, 0, 0, 0, 0);
+      item.id = `flower-h-${row}-${col}`;
+      item.pin = true;
+      item.X = -extent + col * step;
+      item.Y = -extent + row * step;
+      cells.push(item);
+    }
+  }
+  const tilt = -(90 - view) * DEG * .4, yaw = 20 * DEG, roll = -6 * DEG;
+  const white = [.94, .94, .95], gold = [.86, .66, .32], green = [.48, .55, .42];
+
+  const animate = time => {
+    const gx = .62 * Math.sin(.53 * time) + .28 * Math.sin(1.21 * time + 1.3) + .10 * Math.sin(2.9 * time + .4);
+    const gz = .60 * Math.sin(.41 * time + 2) + .30 * Math.sin(.97 * time + .7) + .10 * Math.sin(2.3 * time);
+    // The head follows the tip of a cantilever stem; the lattice plane rocks gently.
+    const headX = centre[0] + sway * .06 * gx, headY = centre[1] - sway * .012 * Math.abs(gx);
+    const lean = sway * .1 * gx;
+    const breath = 1 + .03 * Math.sin(.23 * time);
+    const petalState = shapes.map(shape => ({
+      angle: shape.angle + lean * .3 + flutter * .06 * Math.sin(1.3 * time + shape.phase),
+      L: length * shape.scaleL * breath * (1 + flutter * .05 * Math.sin(1.9 * time + shape.phase)),
+      W: width * shape.scaleW, phase: shape.phase,
+    }));
+    const planeYaw = yaw + sway * .05 * gz, planePitch = tilt + sway * .035 * gx;
+    const spheres = cells.map(cell => {
+      const dx = cell.X - headX, dy = cell.Y - headY;
+      const r = Math.hypot(dx, dy), theta = Math.atan2(dy, dx);
+      // Petal tone: inside the obovate outline, brightest along the midrib and
+      // mid-length, with a flutter wave travelling from base to tip.
+      let petalTone = 0;
+      for (const p of petalState) {
+        const d = Math.atan2(Math.sin(theta - p.angle), Math.cos(theta - p.angle));
+        if (Math.abs(d) > 1.4) continue;
+        const u = (r * Math.cos(d) - inner) / p.L;
+        if (u < -.05 || u > 1.1) continue;
+        const v = r * Math.sin(d) / (p.W * halfWidth(clamp(u, 0, 1)));
+        const side = 1 - smoothStep((Math.abs(v) - .7) / .4);
+        const tip = 1 - smoothStep((u - tipLimit(clamp(v, -1, 1)) + .06) / .14);
+        const base = smoothStep((u + .05) / .15);
+        const shade = (1 - .62 * v * v) * (.42 + .58 * Math.sin(Math.PI * clamp(u * .9 + .1, 0, 1)))
+          + flutter * .22 * u * Math.sin(1.9 * time - 6 * u + p.phase);
+        petalTone = Math.max(petalTone, side * tip * base * clamp(shade, 0, 1));
+      }
+      // Disc: a ring of stamens around a sparse centre, as in the halftone reference.
+      const ring = (r / disc - .82) / .32;
+      const discTone = r < disc * 1.4 ? .9 * Math.exp(-ring * ring) + .12 * (1 - r / disc) * (r < disc) : 0;
+      // Stem: a quadratic curve from the head to the bottom edge, bent by the sway.
+      let stemTone = 0;
+      if (stem && cell.Y < headY - disc) {
+        const s = (headY - disc - cell.Y) / (headY - disc + extent);
+        const x = headX * (1 - s) ** 2 + .08 * s * (1 - s) * 2 - .03 * s * s;
+        stemTone = .45 * (1 - smoothStep((Math.abs(cell.X - x) - step * .35) / (step * .6)));
+      }
+      const tone = Math.max(petalTone, discTone, stemTone);
+      const size = step * .47 * (.08 + .92 * tone ** 1.15);
+      let colour = white;
+      if (natural && tone > 0) {
+        const w = [petalTone, discTone * 1.6, stemTone * 1.4], sum = w[0] + w[1] + w[2] || 1;
+        colour = [0, 1, 2].map(c => (white[c] * w[0] + gold[c] * w[1] + green[c] * w[2]) / sum);
+      }
+      const [x, y, z] = orient(cell.X * .95, cell.Y * .95, 0, planeYaw, planePitch, roll);
+      return { ...cell, x, y, z, r: size, tr: colour[0], tg: colour[1], tb: colour[2], ta: 1,
+        sr: colour[0] * .82, sg: colour[1] * .82, sb: colour[2] * .84,
+        phase: Math.acos(-LIGHT[2]), tilt: Math.atan2(-LIGHT[1], -LIGHT[0]), lx: LIGHT[0], ly: LIGHT[1], lz: LIGHT[2], lw: 1 };
+    });
+    return { spheres, links: [] };
+  };
+  return {
+    ...animate(0),
+    animate: (time, clocks = {}) => animate(number(clocks.breeze, 0)),
+    clockRates: { breeze: clamp(number(state.flowerBreeze, .7), 0, 3) },
+    scene: backdrop ? { background: [.133, .133, .137], dark: true } : {},
+  };
+}
+
+const smoothStep = v => { const x = clamp(v, 0, 1); return x * x * (3 - 2 * x); };
+
 export function flower(state, seed) {
+  if (state.flowerHalftone !== false) return halftone(state, seed);
   const petals = Math.round(clamp(number(state.flowerPetals, 8), 5, 13));
   const detail = Math.round(clamp(number(state.flowerDetail, 1), 0, 3));
   const openness = clamp(number(state.flowerOpen, .55), 0, 1);

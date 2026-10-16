@@ -7,7 +7,7 @@ A reconstructed browser-based parametric generative graphics editor.
 - Select an icon in the bottom dock to choose connected clusters, concentric rings, a 3D wave loop, a scattered cloud, a square grid, a compass ring, a DNA helix, the solar system, or a cosmos flower.
 - The DNA helix winds two strands around a tilted axis, with rungs joining each base pair and optional backbone lines. Spheres travel slowly along the strand and shrink to nothing at the ends before re-entering, so the wrap is never visible. Adjust base pairs, turns, flow, spin, groove angle and axis tilt.
 - The solar system places the Sun and eight planets on their real orbits and spins each body at its real rotation rate. Adjust days per second, rotation speed, distance and size realism, and camera elevation. Toggle a start in alignment (as in the reference image) or at J2000 positions, orbit paths, natural colour, sunlight and the space backdrop.
-- The cosmos flower is built from petal, disc, stamen, bract and stem spheres. The stem sways in the wind and the petals flutter along their own surfaces. Adjust petal count, detail, bloom, stem sway, petal flutter, breeze speed and viewing angle.
+- The cosmos flower draws by default as a halftone lattice: a fixed grid of spheres whose sizes trace the petals, stamen ring and stem. Turn off Halftone lattice for the sculpted 3D version, built from petal, disc, stamen, bract and stem spheres. The stem sways in the wind and the petals flutter along their own surfaces. Adjust petal count, detail, bloom, stem sway, petal flutter, breeze speed and viewing angle.
 - The wave loop is a closed 3D curve: spheres flow along it while a travelling wave moves it towards and away from the camera, and the loop sways. Adjust wave depth, density, waves per loop and flow.
 - While playing, formations respond immediately with exponential easing matched to the supplied Sphere Field Studio reference. They reach about 90% of the new arrangement in 0.4 seconds and 95% in 0.5 seconds, completing the subtle settling tail at 0.85 seconds. Existing balls travel to nearby positions, extra balls grow from the current arrangement, and surplus balls merge and shrink. Repeated selections restart from the displayed arrangement without jumping. Timing stays consistent across display refresh rates.
 - Adjust the formation-specific sliders, then choose Wind, Ripple, Sweep, Around, or Flicker independently.
@@ -34,6 +34,10 @@ The source video does not establish exact algorithms, ranges, Wind behaviour, or
 - **Light.** Planets are lit from the Sun's position, with a wrapped terminator. The Sun uses linear limb darkening I(μ) = 1 − 0.6(1 − μ). Natural colours are approximations.
 
 ## Flower model
+
+- **Halftone lattice (default).** A square grid of spheres lies in a gently tilted plane. Each sphere's radius encodes a tone field, like a halftone print. The petal tone uses the obovate outline below in polar coordinates around the head. It is brightest along the midrib and at mid-length, so spheres swell toward each petal's centre and shrink toward its edges. The disc is a Gaussian ring of stamens around a sparse centre. The stem is a curve bent by the sway. Spheres never leave the grid; flutter, bloom and sway move through the size field, and the plane rocks slightly with the wind.
+
+The sculpted 3D version uses:
 
 - **Petals.** Each ray floret is an obovate outline with a narrow base and a broad, shallow-toothed tip, filled with evenly spaced spheres. Along its length the petal follows a circular arc whose bend angle falls linearly from base to tip; Bloom sets the base angle and the tip droop. Lateral cupping, pleats, a small per-petal twist and alternating layers are offsets along the petal normal.
 - **Disc and stamens.** Disc florets follow Vogel's phyllotaxis, r = R√(k/n) and θ = k × 137.508°, over a low dome. Anthers sit above the disc on the same spiral.
