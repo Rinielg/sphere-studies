@@ -8,9 +8,9 @@ const defaults = {
   sphereCount: 12, pairs: 14, turns: 1.4, helixFlow: .35, spin: .12, groove: 150, helixTilt: -32,
   backbone: true, strandColour: true,
   solarDays: 12, solarSpin: .5, solarDistance: .12, solarSize: .15, solarElevation: 14,
-  solarAligned: true, solarPaths: true, solarNatural: true, solarLight: true, solarBackdrop: true,
+  solarAligned: true, solarPaths: true,
   flowerPetals: 8, flowerDetail: 1, flowerOpen: .55, flowerSway: .45, flowerFlutter: .4, flowerBreeze: .7, flowerView: 48,
-  flowerHalftone: true, flowerStem: true, flowerNatural: true, flowerBackdrop: true,
+  flowerHalftone: true, flowerStem: true,
   drift: true, speed: 1.2, spread: 2.8, lift: 1, seed: 7283,
   loopLayoutVersion: 3
 };
@@ -51,8 +51,8 @@ const parameterSpecs = {
 };
 const toggleSpecs = {
   backbone: 'Backbone lines', strandColour: 'Colour by strand',
-  solarAligned: 'Start aligned', solarPaths: 'Orbit paths', solarNatural: 'Natural colour', solarLight: 'Sunlight', solarBackdrop: 'Space backdrop',
-  flowerHalftone: 'Halftone lattice', flowerStem: 'Stem', flowerNatural: 'Natural colour', flowerBackdrop: 'Reference backdrop'
+  solarAligned: 'Start aligned', solarPaths: 'Orbit paths',
+  flowerHalftone: 'Halftone lattice', flowerStem: 'Stem'
 };
 // Toggling these restarts the formation's clocks, so the starting arrangement is visible.
 const clockResetKeys = new Set(['solarAligned']);
@@ -60,8 +60,8 @@ const formParameters = {
   clusters: ['nodes'], rings: ['ringCount'], loop: ['loopDepth', 'loopDensity', 'loopWaves', 'loopFlow'],
   cloud: ['cloudDensity'], grid: ['gridSize'], compass: ['sphereCount'],
   helix: ['pairs', 'turns', 'helixFlow', 'spin', 'groove', 'helixTilt', 'backbone', 'strandColour'],
-  solar: ['solarDays', 'solarSpin', 'solarDistance', 'solarSize', 'solarElevation', 'solarAligned', 'solarPaths', 'solarNatural', 'solarLight', 'solarBackdrop'],
-  flower: ['flowerPetals', 'flowerDetail', 'flowerOpen', 'flowerSway', 'flowerFlutter', 'flowerBreeze', 'flowerView', 'flowerHalftone', 'flowerStem', 'flowerNatural', 'flowerBackdrop']
+  solar: ['solarDays', 'solarSpin', 'solarDistance', 'solarSize', 'solarElevation', 'solarAligned', 'solarPaths'],
+  flower: ['flowerPetals', 'flowerDetail', 'flowerOpen', 'flowerSway', 'flowerFlutter', 'flowerBreeze', 'flowerView', 'flowerHalftone', 'flowerStem']
 };
 
 function restore() {
@@ -163,16 +163,12 @@ function updateInterface() {
   document.querySelectorAll('[data-formation]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.formation === state.formation)));
   document.querySelectorAll('[data-motion]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.motion === state.motion)));
   $('drift-switch').checked = state.drift;
-  // Formations that drive their own surfaces (planet spin, lit petals) ignore motion patterns.
+  // Formations that drive their own surfaces (planet spin) ignore motion patterns.
   const ownSurface = formation.spheres.every(s => s._morphMarker || Number.isFinite(s.phase));
   $('motion-buttons').hidden = ownSurface;
   $('wave-controls').hidden = ownSurface || state.motion === 'flicker';
   $('formation-name').textContent = FORMATIONS.find(f => f.id === state.formation).label;
   $('sphere-count').textContent = `${formation.spheres.filter(s => !s._morphMarker).length} spheres`;
-  const scene = formation.scene || {};
-  document.body.dataset.backdrop = scene.dark ? 'dark' : 'light';
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', scene.background
-    ? `rgb(${scene.background.map(c => Math.round(c * 255)).join(',')})` : '#f1f1f1');
 }
 
 function rebuild(animate = true, duration = MORPH_DURATION_MS) {
@@ -211,7 +207,7 @@ function updatePlayback() {
 function togglePlayback() { playing = !playing; lastFrame = performance.now(); updatePlayback(); }
 
 function evaluateSphereMotion(sphere) {
-  // Formations that set their own surface (planet spin, petal shading) keep it.
+  // Formations that set their own surface (planet spin) keep it.
   if (Number.isFinite(sphere.phase)) return { phase: sphere.phase, tilt: sphere.tilt, dx: 0, dy: 0, dz: 0 };
   const transition = smooth((presentationTime - motionChangedAt) / 450);
   const motionState = { ...state, speed: 1 };
@@ -254,7 +250,7 @@ function draw() {
   const scene = formationMorph ? sampleMorph(formationMorph, target, presentationTime) : target;
   if (formationMorph && isMorphComplete(formationMorph, presentationTime)) formationMorph = null;
   lastScene = scene;
-  renderer.draw(scene.spheres, scene.links, 1, formation.scene);
+  renderer.draw(scene.spheres, scene.links);
 }
 
 function frame(now) {

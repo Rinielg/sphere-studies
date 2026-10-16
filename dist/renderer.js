@@ -3,9 +3,6 @@ precision highp float;
 attribute vec4 a_sphere;
 attribute vec3 a_material;
 attribute vec2 a_corner;
-attribute vec4 a_tint;
-attribute vec3 a_tint2;
-attribute vec4 a_light;
 uniform vec2 u_resolution;
 uniform vec2 u_origin;
 uniform float u_scale;
@@ -17,9 +14,6 @@ varying vec3 v_material;
 varying float v_size;
 varying float v_z;
 varying float v_r;
-varying vec4 v_tint;
-varying vec3 v_tint2;
-varying vec4 v_light;
 void main() {
   // Depth mode projects centres through a pinhole camera; the legacy mode only scales radii.
   float projection = u_mode > .5 ? u_lens / (u_lens - a_sphere.z) : 1.;
@@ -35,9 +29,6 @@ void main() {
   v_size = radius;
   v_z = a_sphere.z;
   v_r = a_sphere.w * u_reveal;
-  v_tint = a_tint;
-  v_tint2 = a_tint2;
-  v_light = a_light;
 }`;
 
 // Each quad ray-casts a sphere. With EXT_frag_depth it writes the surface's true
@@ -50,9 +41,6 @@ varying vec3 v_material;
 varying float v_size;
 varying float v_z;
 varying float v_r;
-varying vec4 v_tint;
-varying vec3 v_tint2;
-varying vec4 v_light;
 uniform float u_depthScale;
 void main() {
   float rr = dot(v_uv, v_uv);
@@ -87,22 +75,6 @@ void main() {
   color = mix(color, featherColor, feather * .58);
   vec3 grey = vec3(.918) + .006 * n.y - .004 * radial;
   vec3 surface = mix(grey, color, mask);
-  // Natural colour: the same rotating cap selects a secondary surface colour,
-  // so spin and surface features stay visible without the studio gradient.
-  vec3 natural = mix(v_tint.rgb, v_tint2, smoothstep(-.08, .16, boundary));
-  natural *= .95 + .07 * n.z;
-  surface = mix(surface, natural, v_tint.a);
-  if (v_light.w > 1.5) {
-    // Emissive photosphere with linear limb darkening, I(mu) = 1 - u(1 - mu), u = 0.6.
-    surface *= mix(1., .4 + .6 * n.z, v_light.w - 1.5);
-  } else if (v_light.w > .05 && dot(v_light.xyz, v_light.xyz) > 1e-6) {
-    // Directional light with a wrapped terminator and a faint specular sheen.
-    vec3 l = normalize(v_light.xyz);
-    float d = dot(n, l);
-    float diffuse = clamp((d + .18) / 1.18, 0., 1.);
-    float sheen = pow(max(dot(reflect(-l, n), vec3(0., 0., 1.)), 0.), 22.) * .12;
-    surface = mix(surface, surface * (.16 + .84 * diffuse) + sheen, min(v_light.w, 1.));
-  }
   float aa = 1.5 / max(v_size, 1.);
   float alpha = 1. - smoothstep(1. - aa, 1., radial);
 #ifdef DEPTH
@@ -130,9 +102,7 @@ void main() {
   gl_Position = vec4(p / u_resolution * vec2(2., -2.) + vec2(-1., 1.), depth, 1.);
   v_opacity = a_opacity;
 }`;
-const lineFragment = `precision mediump float; varying float v_opacity; uniform vec4 u_lineColor; void main() { gl_FragColor = vec4(u_lineColor.rgb, u_lineColor.a * v_opacity); }`;
-const DEFAULT_LINE = [.46, .47, .49, .26];
-const DEFAULT_BACKGROUND = [241 / 255, 241 / 255, 241 / 255];
+const lineFragment = `precision mediump float; varying float v_opacity; void main() { gl_FragColor = vec4(.46, .47, .49, .26 * v_opacity); }`;
 
 // Camera distance in scene units, and the factor mapping scene z (±2.5) into the depth buffer.
 const CAMERA_DISTANCE = 5;
@@ -167,12 +137,12 @@ export class SphereRenderer {
     this.lineProgram = program(gl, lineVertex, lineFragment);
     this.sphereBuffer = gl.createBuffer();
     this.lineBuffer = gl.createBuffer();
-    this.attributes = Object.fromEntries(['a_sphere', 'a_material', 'a_corner', 'a_tint', 'a_tint2', 'a_light'].map(n => [n, gl.getAttribLocation(this.sphereProgram, n)]));
+    this.attributes = Object.fromEntries(['a_sphere', 'a_material', 'a_corner'].map(n => [n, gl.getAttribLocation(this.sphereProgram, n)]));
     this.lineAttribute = gl.getAttribLocation(this.lineProgram, 'a_position');
     this.lineOpacityAttribute = gl.getAttribLocation(this.lineProgram, 'a_opacity');
     this.uniforms = new Map();
     for (const p of [this.sphereProgram, this.lineProgram]) {
-      this.uniforms.set(p, Object.fromEntries(['u_resolution', 'u_origin', 'u_scale', 'u_reveal', 'u_lens', 'u_mode', 'u_depthScale', 'u_lineColor'].map(n => [n, gl.getUniformLocation(p, n)])));
+      this.uniforms.set(p, Object.fromEntries(['u_resolution', 'u_origin', 'u_scale', 'u_reveal', 'u_lens', 'u_mode', 'u_depthScale'].map(n => [n, gl.getUniformLocation(p, n)])));
     }
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -204,11 +174,10 @@ export class SphereRenderer {
     if (u.u_depthScale) gl.uniform1f(u.u_depthScale, DEPTH_SCALE);
   }
 
-  drawLines(spheres, links, color = DEFAULT_LINE) {
+  drawLines(spheres, links) {
     if (!links.length) return;
     const gl = this.gl;
     this.bindScene(this.lineProgram);
-    gl.uniform4f(this.uniforms.get(this.lineProgram).u_lineColor, ...color);
     const points = new Map(spheres.map(s => [s.id, s]));
     const lines = [];
     for (const [a, b, opacity = 1] of links) {
@@ -232,33 +201,27 @@ export class SphereRenderer {
     const corners = [-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1];
     // Back-to-front order still matters for the translucent antialiased rims.
     const sorted = spheres.filter(s => s.r > .0005).sort((a, b) => a.z - b.z);
-    const stride = 20, data = new Float32Array(sorted.length * 6 * stride);
-    const f = v => Number.isFinite(v) ? v : 0;
+    const data = new Float32Array(sorted.length * 6 * 9);
     let index = 0;
     for (const s of sorted) {
-      // Optional natural colour (tr..ta, sr..sb) and lighting (lx..lw) fields default to off.
-      const extra = [f(s.tr), f(s.tg), f(s.tb), f(s.ta), f(s.sr), f(s.sg), f(s.sb), f(s.lx), f(s.ly), f(s.lz), f(s.lw)];
       for (let corner = 0; corner < 6; corner++) {
-        data.set([s.x, s.y, s.z, s.r, s.phase, s.tilt, s.palette, corners[corner * 2], corners[corner * 2 + 1], ...extra], index);
-        index += stride;
+        data.set([s.x, s.y, s.z, s.r, s.phase, s.tilt, s.palette, corners[corner * 2], corners[corner * 2 + 1]], index);
+        index += 9;
       }
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, this.sphereBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
-    for (const [name, size, offset] of [['a_sphere', 4, 0], ['a_material', 3, 16], ['a_corner', 2, 28], ['a_tint', 4, 36], ['a_tint2', 3, 52], ['a_light', 4, 64]]) {
+    for (const [name, size, offset] of [['a_sphere', 4, 0], ['a_material', 3, 16], ['a_corner', 2, 28]]) {
       const loc = this.attributes[name];
-      if (loc < 0) continue;
       gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, stride * 4, offset);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 36, offset);
     }
     gl.drawArrays(gl.TRIANGLES, 0, sorted.length * 6);
-    Object.values(this.attributes).forEach(loc => loc >= 0 && gl.disableVertexAttribArray(loc));
+    Object.values(this.attributes).forEach(loc => gl.disableVertexAttribArray(loc));
   }
 
-  /** options.background is linear RGB 0–1; options.lineColor is RGBA. */
-  draw(spheres, links, reveal = 1, options = {}) {
+  draw(spheres, links, reveal = 1) {
     const gl = this.gl;
-    gl.clearColor(...(options.background || DEFAULT_BACKGROUND), 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     if (this.depthCorrect) {
       // Spheres write depth first; lines are then depth-tested without writing.
@@ -267,11 +230,11 @@ export class SphereRenderer {
       gl.depthMask(true);
       this.drawSpheres(spheres, reveal);
       gl.depthMask(false);
-      this.drawLines(spheres, links, options.lineColor);
+      this.drawLines(spheres, links);
       gl.depthMask(true);
     } else {
       gl.disable(gl.DEPTH_TEST);
-      this.drawLines(spheres, links, options.lineColor);
+      this.drawLines(spheres, links);
       this.drawSpheres(spheres, reveal);
     }
   }

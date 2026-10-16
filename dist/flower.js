@@ -3,19 +3,13 @@
  * along circular arcs; the disc uses Vogel's phyllotaxis (golden angle); the
  * stem is a cubic Bézier. Wind sways the stem as a cantilever beam and petals
  * flutter along their own surface normals, so every displacement follows the
- * petal shape rather than a shared screen-space field.
+ * petal shape rather than a shared screen-space field. Spheres use the shared
+ * studio material, so the selected motion pattern drives their surfaces.
  */
 import { TAU, clamp, number, random, sphere } from './common.js';
 
 const DEG = Math.PI / 180;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-const LIGHT = (() => { const v = [-.45, .65, .62], l = Math.hypot(...v); return v.map(c => c / l); })();
-const COLOURS = {
-  petal: [[.97, .975, .97], [.70, .78, .80]],
-  disc: [[.80, .58, .25], [.58, .38, .14]],
-  anther: [[.95, .78, .44], [.78, .58, .27]],
-  stem: [[.36, .39, .30], [.24, .27, .20]],
-};
 
 // Rotate by yaw (about y), pitch (about x), then roll (screen plane).
 function orient(x, y, z, yaw, pitch, roll) {
@@ -56,8 +50,7 @@ function halftone(state, seed) {
   const sway = clamp(number(state.flowerSway, .45), 0, 1);
   const flutter = clamp(number(state.flowerFlutter, .4), 0, 1);
   const view = clamp(number(state.flowerView, 48), 0, 85) * DEG;
-  const stem = state.flowerStem !== false, natural = state.flowerNatural !== false;
-  const backdrop = state.flowerBackdrop !== false;
+  const stem = state.flowerStem !== false;
 
   const n = [24, 34, 44, 56][detail], extent = .94, step = 2 * extent / (n - 1);
   const centre = [0, .18], inner = .11, disc = .1;
@@ -79,7 +72,6 @@ function halftone(state, seed) {
     }
   }
   const tilt = -(90 - view) * DEG * .4, yaw = 20 * DEG, roll = -6 * DEG;
-  const white = [.94, .94, .95], gold = [.86, .66, .32], green = [.48, .55, .42];
 
   const animate = time => {
     const gx = .62 * Math.sin(.53 * time) + .28 * Math.sin(1.21 * time + 1.3) + .10 * Math.sin(2.9 * time + .4);
@@ -125,15 +117,8 @@ function halftone(state, seed) {
       }
       const tone = Math.max(petalTone, discTone, stemTone);
       const size = step * .47 * (.08 + .92 * tone ** 1.15);
-      let colour = white;
-      if (natural && tone > 0) {
-        const w = [petalTone, discTone * 1.6, stemTone * 1.4], sum = w[0] + w[1] + w[2] || 1;
-        colour = [0, 1, 2].map(c => (white[c] * w[0] + gold[c] * w[1] + green[c] * w[2]) / sum);
-      }
       const [x, y, z] = orient(cell.X * .95, cell.Y * .95, 0, planeYaw, planePitch, roll);
-      return { ...cell, x, y, z, r: size, tr: colour[0], tg: colour[1], tb: colour[2], ta: 1,
-        sr: colour[0] * .82, sg: colour[1] * .82, sb: colour[2] * .84,
-        phase: Math.acos(-LIGHT[2]), tilt: Math.atan2(-LIGHT[1], -LIGHT[0]), lx: LIGHT[0], ly: LIGHT[1], lz: LIGHT[2], lw: 1 };
+      return { ...cell, x, y, z, r: size };
     });
     return { spheres, links: [] };
   };
@@ -141,7 +126,6 @@ function halftone(state, seed) {
     ...animate(0),
     animate: (time, clocks = {}) => animate(number(clocks.breeze, 0)),
     clockRates: { breeze: clamp(number(state.flowerBreeze, .7), 0, 3) },
-    scene: backdrop ? { background: [.133, .133, .137], dark: true } : {},
   };
 }
 
@@ -155,8 +139,7 @@ export function flower(state, seed) {
   const sway = clamp(number(state.flowerSway, .45), 0, 1);
   const flutter = clamp(number(state.flowerFlutter, .4), 0, 1);
   const view = clamp(number(state.flowerView, 48), 0, 85) * DEG;
-  const stem = state.flowerStem !== false, natural = state.flowerNatural !== false;
-  const backdrop = state.flowerBackdrop !== false;
+  const stem = state.flowerStem !== false;
 
   const spacing = [.05, .042, .034, .027][detail];
   const inner = .085, length = .56, width = .17;
@@ -168,11 +151,6 @@ export function flower(state, seed) {
     item.pin = true;
     item.kind = kind;
     Object.assign(item, data);
-    if (natural) {
-      // Each petal catches the light slightly differently, which separates overlapping blades.
-      const [main, shade] = COLOURS[kind].map(c => c.map(v => v * (data.shape ? .955 + .045 * Math.cos(data.shape.angle * 3 + data.shape.phase) : 1)));
-      Object.assign(item, { tr: main[0], tg: main[1], tb: main[2], ta: 1, sr: shade[0], sg: shade[1], sb: shade[2] });
-    }
     items.push(item);
   };
 
@@ -240,12 +218,7 @@ export function flower(state, seed) {
   }
 
   const stemLength = Math.hypot(top[0] - root[0], top[1] - root[1]);
-  const shadeCap = { phase: Math.acos(-LIGHT[2]), tilt: Math.atan2(-LIGHT[1], -LIGHT[0]) };
-  const finish = (item, x, y, z) => {
-    const out = { ...item, x, y, z, r: item.size };
-    if (natural) Object.assign(out, shadeCap, { lx: LIGHT[0], ly: LIGHT[1], lz: LIGHT[2], lw: 1 });
-    return out;
-  };
+  const finish = (item, x, y, z) => ({ ...item, x, y, z, r: item.size });
 
   const animate = time => {
     // Wind: three incommensurate sinusoids per axis give a non-repeating breeze.
@@ -296,6 +269,5 @@ export function flower(state, seed) {
     ...animate(0),
     animate: (time, clocks = {}) => animate(number(clocks.breeze, 0)),
     clockRates: { breeze: clamp(number(state.flowerBreeze, .7), 0, 3) },
-    scene: backdrop ? { background: [.29, .38, .40], dark: true } : {},
   };
 }

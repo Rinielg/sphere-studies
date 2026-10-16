@@ -3,8 +3,7 @@
  * positional drift can keep running independently of a geometry transition.
  * Times are milliseconds. No input scene is mutated.
  */
-// Natural colour (tr..ta, sr..sb) and light (lx..lw) blend with geometry.
-const scalarFields = ['x', 'y', 'z', 'r', 'palette', 'tr', 'tg', 'tb', 'ta', 'sr', 'sg', 'sb', 'lx', 'ly', 'lz', 'lw'];
+const scalarFields = ['x', 'y', 'z', 'r', 'palette'];
 export const MORPH_DURATION_MS = 850;
 // Match the reference's 9% approach per frame at 60 Hz without making the
 // perceived response depend on the display's refresh rate.

@@ -6,7 +6,7 @@ A reconstructed browser-based parametric generative graphics editor.
 
 - Select an icon in the bottom dock to choose connected clusters, concentric rings, a 3D wave loop, a scattered cloud, a square grid, a compass ring, a DNA helix, the solar system, or a cosmos flower.
 - The DNA helix winds two strands around a tilted axis, with rungs joining each base pair and optional backbone lines. Spheres travel slowly along the strand and shrink to nothing at the ends before re-entering, so the wrap is never visible. Adjust base pairs, turns, flow, spin, groove angle and axis tilt.
-- The solar system places the Sun and eight planets on their real orbits and spins each body at its real rotation rate. Adjust days per second, rotation speed, distance and size realism, and camera elevation. Toggle a start in alignment (as in the reference image) or at J2000 positions, orbit paths, natural colour, sunlight and the space backdrop.
+- The solar system places the Sun and eight planets on their real orbits and spins each body at its real rotation rate. Adjust days per second, rotation speed, distance and size realism, and camera elevation. Toggle a start in alignment (as in the reference image) or at J2000 positions, and orbit paths. Each body's colour cap turns with its rotation.
 - The cosmos flower draws by default as a halftone lattice: a fixed grid of spheres whose sizes trace the petals, stamen ring and stem. Turn off Halftone lattice for the sculpted 3D version, built from petal, disc, stamen, bract and stem spheres. The stem sways in the wind and the petals flutter along their own surfaces. Adjust petal count, detail, bloom, stem sway, petal flutter, breeze speed and viewing angle.
 - The wave loop is a closed 3D curve: spheres flow along it while a travelling wave moves it towards and away from the camera, and the loop sways. Adjust wave depth, density, waves per loop and flow.
 - While playing, formations respond immediately with exponential easing matched to the supplied Sphere Field Studio reference. They reach about 90% of the new arrangement in 0.4 seconds and 95% in 0.5 seconds, completing the subtle settling tail at 0.85 seconds. Existing balls travel to nearby positions, extra balls grow from the current arrangement, and surplus balls merge and shrink. Repeated selections restart from the displayed arrangement without jumping. Timing stays consistent across display refresh rates.
@@ -31,7 +31,7 @@ The source video does not establish exact algorithms, ranges, Wind behaviour, or
 - **Rotation.** Each body spins about its IAU WGCCRE pole at its signed sidereal period, so Venus and Uranus rotate retrograde and Uranus rolls on its side. The rotating surface cap shows the spin.
 - **Saturn's rings.** Particles sit at the C, B and A ring radii, with the Cassini division between B and A. They lie in Saturn's equatorial plane and orbit at Keplerian periods T = 2π√(ρ³/GM). The ring opening angle changes with Saturn's position along its orbit.
 - **Scale.** Real distances span about 0.4–30 AU and real radii span 2,440–695,700 km, so the display compresses both. Distance realism blends each semi-major axis in log space from even spacing (0) to true proportion (1); orbit shapes are scaled about the Sun at their focus, which keeps them exact. Size realism sets the power-law exponent on radii, normalised to Jupiter; 1 is true proportion. The Sun is capped so it never covers Mercury's perihelion.
-- **Light.** Planets are lit from the Sun's position, with a wrapped terminator. The Sun uses linear limb darkening I(μ) = 1 − 0.6(1 − μ). Natural colours are approximations.
+- **Material.** Every body uses the shared studio sphere material. The motion patterns do not apply here, because each cap is set by the body's own rotation.
 
 ## Flower model
 
@@ -49,7 +49,7 @@ The sculpted 3D version uses:
 - `dist/formations.js` — deterministic procedural geometry and motion fields.
 - `dist/solar.js` and `dist/flower.js` — the solar system and cosmos flower formations.
 - `dist/common.js` — shared seeded random, sphere identity and helper functions.
-- `dist/renderer.js` — shared analytic sphere material, optional natural colour and lighting, backdrops, and fine connector lines.
+- `dist/renderer.js` — shared analytic sphere material and fine connector lines.
 - `dist/morphs.js` — sphere matching, continuous geometry/material interpolation, population changes, and connection fades.
 - `dist/app.js` — state, parameter controls, playback, transitions, and export.
 - `dist/index.html` and `dist/styles.css` — responsive interface.
